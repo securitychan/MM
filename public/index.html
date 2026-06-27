@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>주식 기간손익 분석기</title>
+    <link rel="stylesheet" href="./styles.css" />
+    <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <script defer src="./app.js"></script>
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Trade Performance Analyzer</p>
+          <h1>주식 기간손익 분석기</h1>
+          <p class="lede">기간손익 엑셀·CSV 파일을 넣으면 종목별 수익률, 일별 수익, 월별·분기별 실적을 계산합니다.</p>
+        </div>
+        <div class="privacy-pill">브라우저 내부 처리</div>
+      </header>
+
+      <section class="upload-panel">
+        <label class="drop-zone" id="dropZone">
+          <input id="fileInput" type="file" accept=".xlsx,.xls,.csv,.tsv" />
+          <span>파일 선택 또는 드래그</span>
+          <strong id="fileName">기간손익 엑셀·CSV 파일을 올려주세요.</strong>
+          <em>매매일, 종목번호, 종목명, 청산수량, 매입평균가, 매도평균가, 손익금액, 수익률(%) 컬럼을 자동 인식합니다.</em>
+        </label>
+        <div class="upload-actions">
+          <button class="primary-button" id="analyzeButton" type="button" disabled>분석 실행</button>
+          <button class="ghost-button" id="sampleButton" type="button">샘플 데이터</button>
+          <button class="ghost-button" id="clearButton" type="button">초기화</button>
+        </div>
+      </section>
+
+      <section class="panel mapping-panel" id="mappingPanel" hidden>
+        <div class="panel-header">
+          <div>
+            <h2>컬럼 확인</h2>
+            <p>자동 인식이 틀리면 여기서 기간손익 파일 컬럼을 바꿔주세요.</p>
+          </div>
+          <label class="sheet-select" id="sheetSelectWrap" hidden>
+            시트
+            <select id="sheetSelect"></select>
+          </label>
+        </div>
+        <div class="mapping-grid">
+          <label>거래일 <select id="mapDate"></select></label>
+          <label>종목코드 <select id="mapSymbol"></select></label>
+          <label>종목명 <select id="mapName"></select></label>
+          <label>매수/매도 <select id="mapSide"></select></label>
+          <label>수량/청산수량 <select id="mapQuantity"></select></label>
+          <label>단가/매도평균가 <select id="mapPrice"></select></label>
+          <label>거래금액 <select id="mapAmount"></select></label>
+          <label>매입평균가 <select id="mapBuyAverage"></select></label>
+          <label>매도평균가 <select id="mapSellAverage"></select></label>
+          <label>수수료 <select id="mapFee"></select></label>
+          <label>세금 <select id="mapTax"></select></label>
+          <label>손익금액 <select id="mapRealized"></select></label>
+          <label>수익률(%) <select id="mapReturnPct"></select></label>
+        </div>
+        <p class="hint">기간손익 파일은 손익금액과 매입평균가를 우선 사용합니다. 매수/매도 체결내역 파일은 기존처럼 FIFO 방식으로 계산합니다.</p>
+      </section>
+
+      <section class="summary-grid" id="summaryGrid">
+        <article class="summary-card">
+          <span>실현손익</span>
+          <strong id="totalPnl">--</strong>
+        </article>
+        <article class="summary-card">
+          <span>실현 수익률</span>
+          <strong id="totalReturn">--</strong>
+        </article>
+        <article class="summary-card">
+          <span>승률</span>
+          <strong id="winRate">--</strong>
+        </article>
+        <article class="summary-card">
+          <span>분석 행</span>
+          <strong id="tradeCount">--</strong>
+        </article>
+      </section>
+
+      <section class="chart-grid">
+        <article class="panel">
+          <div class="panel-header">
+            <div>
+              <h2>일별 수익</h2>
+              <p>청산일 또는 매도일 기준 실현손익을 일자별로 집계합니다.</p>
+            </div>
+          </div>
+          <canvas id="dailyChart" width="980" height="360"></canvas>
+        </article>
+        <article class="panel">
+          <div class="panel-header">
+            <div>
+              <h2>월 실적</h2>
+              <p>월별 실현손익과 누적 추이를 봅니다.</p>
+            </div>
+          </div>
+          <canvas id="monthlyChart" width="980" height="360"></canvas>
+        </article>
+        <article class="panel">
+          <div class="panel-header">
+            <div>
+              <h2>종목별 수익률</h2>
+              <p>종목별 실현손익과 투입원가 대비 수익률입니다.</p>
+            </div>
+          </div>
+          <canvas id="symbolChart" width="980" height="360"></canvas>
+        </article>
+      </section>
+
+      <section class="table-grid">
+        <article class="panel">
+          <div class="panel-header">
+            <div>
+              <h2>종목별 성과</h2>
+              <p id="symbolCaption">파일을 넣으면 결과가 표시됩니다.</p>
+            </div>
+            <button class="ghost-button" id="exportSymbol" type="button" disabled>CSV 저장</button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>종목</th>
+                  <th>매입금액</th>
+                  <th>매도금액</th>
+                  <th>실현손익</th>
+                  <th>수익률</th>
+                  <th>남은수량</th>
+                  <th>승률</th>
+                </tr>
+              </thead>
+              <tbody id="symbolTable"></tbody>
+            </table>
+          </div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-header">
+            <div>
+              <h2>월별·분기별 실적</h2>
+              <p>월별 결과와 분기별 결과를 함께 확인합니다.</p>
+            </div>
+          </div>
+          <div class="split-tables">
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>월</th>
+                    <th>실현손익</th>
+                    <th>수익률</th>
+                    <th>거래수</th>
+                  </tr>
+                </thead>
+                <tbody id="monthTable"></tbody>
+              </table>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>분기</th>
+                    <th>실현손익</th>
+                    <th>수익률</th>
+                    <th>거래수</th>
+                  </tr>
+                </thead>
+                <tbody id="quarterTable"></tbody>
+              </table>
+            </div>
+          </div>
+        </article>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <h2>입력내역 미리보기</h2>
+            <p id="previewCaption">최대 12개 행을 표시합니다.</p>
+          </div>
+          <button class="ghost-button" id="exportTrades" type="button" disabled>분석용 CSV</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>일자</th>
+                <th>종목</th>
+                <th>구분</th>
+                <th>수량</th>
+                <th>단가/매도가</th>
+                <th>금액</th>
+                <th>비용</th>
+                <th>실현손익</th>
+              </tr>
+            </thead>
+            <tbody id="tradePreview"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <footer class="footer-note">
+        계산은 정보 확인용입니다. 증권사 원장, 세금 계산, 환율 반영 방식과 다를 수 있습니다.
+      </footer>
+    </main>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  </body>
+</html>

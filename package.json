@@ -1,0 +1,12 @@
+{
+  "name": "trade-history-analyzer",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Client-side stock trade history analyzer for Excel and CSV files.",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
