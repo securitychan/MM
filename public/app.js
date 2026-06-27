@@ -88,6 +88,12 @@ function formatMoney(value) {
   return `${sign}${new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 0 }).format(Math.abs(value))}`;
 }
 
+function formatSignedMoney(value) {
+  if (value == null || Number.isNaN(value)) return "--";
+  const sign = value > 0 ? "+" : value < 0 ? "-" : "";
+  return `${sign}${new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 0 }).format(Math.abs(value))}`;
+}
+
 function formatNumber(value, digits = 2) {
   if (value == null || Number.isNaN(value)) return "--";
   return new Intl.NumberFormat("ko-KR", {
@@ -104,6 +110,21 @@ function formatPct(value) {
 function formatRate(value) {
   if (value == null || Number.isNaN(value)) return "--";
   return `${formatNumber(value, 2)}%`;
+}
+
+function formatCompactMoney(value) {
+  if (value == null || Number.isNaN(value)) return "--";
+  const sign = value < 0 ? "-" : value > 0 ? "+" : "";
+  const abs = Math.abs(value);
+  if (abs >= 100000000) return `${sign}${formatNumber(abs / 100000000, abs >= 1000000000 ? 1 : 2)}억`;
+  if (abs >= 10000) return `${sign}${formatNumber(abs / 10000, abs >= 100000 ? 0 : 1)}만`;
+  return `${sign}${formatNumber(abs, 0)}`;
+}
+
+function formatShortDate(value) {
+  const text = String(value ?? "");
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return `${Number(text.slice(5, 7))}/${Number(text.slice(8, 10))}`;
+  return text;
 }
 
 function cssClassBySign(value) {
@@ -541,7 +562,11 @@ function niceRange(values) {
   return { min: min - pad, max: max + pad };
 }
 
-function drawAxis(ctx, plot, min, max) {
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function drawAxis(ctx, plot, min, max, valueFormatter = formatCompactMoney) {
   ctx.strokeStyle = "#dce2dc";
   ctx.fillStyle = "#627069";
   ctx.font = "12px system-ui, sans-serif";
@@ -554,27 +579,36 @@ function drawAxis(ctx, plot, min, max) {
     ctx.moveTo(plot.left, y);
     ctx.lineTo(plot.right, y);
     ctx.stroke();
-    ctx.fillText(formatMoney(value), plot.left - 8, y);
+    ctx.fillText(valueFormatter(value), plot.left - 8, y);
   }
 }
 
-function drawBarChart(canvas, rows, valueKey, labelKey, colorMode = "sign") {
+function drawBarChart(canvas, rows, valueKey, labelKey, options = {}) {
   if (!rows.length) {
     drawEmpty(canvas, "표시할 데이터가 없습니다.");
     return;
   }
   const { ctx, width, height } = setupCanvas(canvas);
-  const plot = { left: 76, right: width - 20, top: 22, bottom: height - 48 };
+  const plot = {
+    left: options.left ?? 84,
+    right: width - 24,
+    top: options.top ?? 42,
+    bottom: height - (options.rotateLabels ? 76 : 58),
+  };
   plot.width = plot.right - plot.left;
   plot.height = plot.bottom - plot.top;
   const values = rows.map((row) => row[valueKey] || 0);
   const { min, max } = niceRange(values);
   const zeroY = plot.bottom - ((0 - min) / (max - min)) * plot.height;
-  const gap = 6;
+  const gap = options.gap ?? 8;
   const barWidth = Math.max(8, (plot.width - gap * (rows.length - 1)) / rows.length);
+  const labelFormatter = options.labelFormatter || ((value) => String(value ?? ""));
+  const valueFormatter = options.valueFormatter || formatCompactMoney;
+  const labelEvery = options.labelEvery ?? Math.max(1, Math.ceil(rows.length / Math.max(1, Math.floor(plot.width / 64))));
+  const valueEvery = options.valueEvery ?? (barWidth >= 24 ? 1 : Math.max(1, Math.ceil(rows.length / 24)));
 
   ctx.clearRect(0, 0, width, height);
-  drawAxis(ctx, plot, min, max);
+  drawAxis(ctx, plot, min, max, valueFormatter);
   ctx.strokeStyle = "#24312b";
   ctx.beginPath();
   ctx.moveTo(plot.left, zeroY);
@@ -587,22 +621,65 @@ function drawBarChart(canvas, rows, valueKey, labelKey, colorMode = "sign") {
     const y = plot.bottom - ((value - min) / (max - min)) * plot.height;
     const top = Math.min(y, zeroY);
     const barHeight = Math.max(2, Math.abs(zeroY - y));
-    ctx.fillStyle = colorMode === "blue" ? "#2869b8" : value >= 0 ? "#1f8a5b" : "#bd3f35";
+    ctx.fillStyle = options.colorMode === "blue" ? "#2869b8" : value >= 0 ? "#1f8a5b" : "#bd3f35";
     ctx.fillRect(x, top, barWidth, barHeight);
   });
 
+  if (options.showValues !== false) {
+    ctx.font = "800 11px system-ui, sans-serif";
+    ctx.textAlign = "center";
+    rows.forEach((row, index) => {
+      if (index % valueEvery !== 0) return;
+      const value = row[valueKey] || 0;
+      const x = plot.left + index * (barWidth + gap) + barWidth / 2;
+      const y = plot.bottom - ((value - min) / (max - min)) * plot.height;
+      const labelY = value >= 0 ? clamp(y - 6, plot.top + 10, plot.bottom - 8) : clamp(y + 14, plot.top + 12, plot.bottom - 4);
+      ctx.fillStyle = value >= 0 ? "#176b48" : "#a9362e";
+      ctx.textBaseline = value >= 0 ? "bottom" : "top";
+      ctx.fillText(valueFormatter(value), x, labelY);
+    });
+  }
+
   ctx.fillStyle = "#627069";
   ctx.font = "12px system-ui, sans-serif";
-  ctx.textAlign = "left";
-  ctx.fillText(rows[0][labelKey], plot.left, height - 15);
-  ctx.textAlign = "right";
-  ctx.fillText(rows.at(-1)[labelKey], plot.right, height - 15);
+  ctx.textBaseline = "alphabetic";
+  rows.forEach((row, index) => {
+    if (index % labelEvery !== 0 && index !== rows.length - 1) return;
+    const x = plot.left + index * (barWidth + gap) + barWidth / 2;
+    const label = labelFormatter(row[labelKey], row);
+    ctx.save();
+    ctx.translate(x, height - 22);
+    if (options.rotateLabels) {
+      ctx.rotate(-Math.PI / 4);
+      ctx.textAlign = "right";
+    } else {
+      ctx.textAlign = "center";
+    }
+    ctx.fillText(label, 0, 0);
+    ctx.restore();
+  });
 }
 
 function drawCharts(result) {
-  drawBarChart(els.dailyChart, result.days.slice(-90), "realizedPnl", "period");
-  drawBarChart(els.monthlyChart, result.months.slice(-24), "realizedPnl", "period");
-  drawBarChart(els.symbolChart, result.symbols.slice(0, 18), "realizedPnl", "symbol");
+  const dailyRows = result.days.slice(-31);
+  const monthlyRows = result.months.slice(-24);
+  const symbolRows = result.symbols.slice(0, 18);
+
+  drawBarChart(els.dailyChart, dailyRows, "realizedPnl", "period", {
+    labelFormatter: formatShortDate,
+    valueFormatter: dailyRows.length <= 12 ? formatSignedMoney : formatCompactMoney,
+    labelEvery: 1,
+    valueEvery: 1,
+    rotateLabels: true,
+  });
+  drawBarChart(els.monthlyChart, monthlyRows, "realizedPnl", "period", {
+    valueFormatter: monthlyRows.length <= 12 ? formatSignedMoney : formatCompactMoney,
+    rotateLabels: true,
+  });
+  drawBarChart(els.symbolChart, symbolRows, "realizedPnl", "symbol", {
+    valueFormatter: symbolRows.length <= 12 ? formatSignedMoney : formatCompactMoney,
+    rotateLabels: true,
+  });
 }
 
 function analyzeCurrentRows() {
